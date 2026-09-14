@@ -3,12 +3,41 @@ import { z } from 'zod';
 
 dotenv.config();
 
+// SECURITY FIX (Weak Cryptographic Secret Management — see SECURITY.md #3):
+// The original schema only required JWT secrets to be non-empty
+// (`z.string().min(1, ...)`), so a one-character secret — or the
+// low-entropy placeholder values shipped in .env.example /
+// .env ("dev-access-secret-change-me-in-production-abc123") — would pass
+// validation and could end up running in production. Weak/guessable JWT
+// signing secrets let an attacker forge valid access tokens (impersonate
+// any user, including System Admin) once they learn or brute-force the
+// secret. We now enforce a minimum length (32 chars ≈ 256 bits when using a
+// hex/base64 secret) and explicitly reject a short-list of known example
+// values that must never be used outside local docs.
+const KNOWN_WEAK_SECRETS = new Set([
+  'your-access-secret-key-change-in-production',
+  'your-refresh-secret-key-change-in-production',
+  'dev-access-secret-change-me-in-production-abc123',
+  'dev-refresh-secret-change-me-in-production-xyz789',
+  'secret',
+  'changeme',
+]);
+
+const strongSecret = (label: string) =>
+  z
+    .string({ required_error: `${label} is required` })
+    .min(32, `${label} must be at least 32 characters long for adequate entropy`)
+    .refine(
+      (value) => !KNOWN_WEAK_SECRETS.has(value),
+      `${label} is a known placeholder value — generate a unique secret (e.g. 'openssl rand -hex 32') before deploying`
+    );
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.string().default('5000'),
   MONGODB_URI: z.string().min(1, 'MongoDB URI is required'),
-  JWT_ACCESS_SECRET: z.string().min(1, 'JWT access secret is required'),
-  JWT_REFRESH_SECRET: z.string().min(1, 'JWT refresh secret is required'),
+  JWT_ACCESS_SECRET: strongSecret('JWT access secret'),
+  JWT_REFRESH_SECRET: strongSecret('JWT refresh secret'),
   JWT_ACCESS_EXPIRATION: z.string().default('15m'),
   JWT_REFRESH_EXPIRATION: z.string().default('7d'),
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
