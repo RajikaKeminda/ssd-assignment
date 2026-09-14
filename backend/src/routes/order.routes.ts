@@ -278,6 +278,11 @@ router.get(
  *       200:
  *         description: User orders retrieved successfully
  */
+// SECURITY FIX (Broken Access Control / IDOR — see SECURITY.md #1):
+// authorize(PATIENT, SYSTEM_ADMIN) only checked *role*, not that :userId
+// belonged to the caller — any patient could read any other patient's full
+// order history by changing the id in the URL. OrderService.getUserOrders
+// now rejects a Patient whose own id doesn't match the requested :userId.
 router.get(
   '/user/:userId',
   authenticate,
@@ -330,9 +335,16 @@ router.get(
  *       200:
  *         description: Delivery partner orders retrieved successfully
  */
+// SECURITY FIX (Broken Access Control / IDOR — see SECURITY.md #1):
+// Previously any authenticated user — including a Patient — could read any
+// delivery partner's full assignment list (customer names, phones, addresses)
+// just by guessing/incrementing a partnerId. We now restrict the route to the
+// roles that legitimately need it, and OrderService.getDeliveryPartnerOrders
+// additionally enforces that a Delivery Partner can only ever query their own id.
 router.get(
   '/delivery-partner/:partnerId',
   authenticate,
+  authorize(UserRole.DELIVERY_PARTNER, UserRole.PHARMACY_STAFF, UserRole.SYSTEM_ADMIN),
   validate(partnerIdParamSchema),
   OrderController.getDeliveryPartnerOrders
 );
@@ -357,6 +369,13 @@ router.get(
  *       404:
  *         description: Order not found
  */
+// SECURITY FIX (Broken Access Control / IDOR — see SECURITY.md #1):
+// This endpoint used to return live tracking + PII for ANY order id to ANY
+// authenticated user. Role-based scoping alone isn't enough here (a Patient
+// legitimately needs this route for their own orders), so the object-level
+// ownership check now lives in OrderService.getDeliveryTracking, which is
+// passed the requester's id/role and throws 403 unless they own the order,
+// are staff/admin, or are the assigned delivery partner.
 router.get(
   '/track/:id',
   authenticate,
@@ -384,6 +403,12 @@ router.get(
  *       404:
  *         description: Order not found
  */
+// SECURITY FIX (Broken Access Control / IDOR — see SECURITY.md #1):
+// Previously this only required a valid access token — no check that the
+// caller actually owned, worked for, or was delivering the order — so any
+// registered Patient could read any other patient's order (name, email,
+// phone, delivery address, items, payment status) by iterating ids.
+// The ownership/role check is enforced in OrderService.getOrderById.
 router.get(
   '/:id',
   authenticate,
@@ -539,6 +564,11 @@ router.patch(
  *       400:
  *         description: Payment failed or order already paid
  */
+// SECURITY FIX (Broken Access Control / IDOR — see SECURITY.md #1):
+// authorize(PATIENT) only proved the caller was *some* patient, not that
+// they owned this order — any patient could pay for (and thereby mark as
+// paid/confirmed) another patient's order. OrderService.processPayment now
+// verifies order.userId matches the requester before charging.
 router.post(
   '/:id/payment',
   authenticate,
@@ -567,6 +597,11 @@ router.post(
  *       404:
  *         description: Order not found
  */
+// SECURITY FIX (Broken Access Control / IDOR — see SECURITY.md #1):
+// The generated PDF invoice contains the customer's name, email, phone and
+// delivery address plus the full payment breakdown; it used to be
+// downloadable by any authenticated user for any order id. Ownership is now
+// enforced in OrderService.generateInvoice via assertOrderAccess().
 router.get(
   '/:id/invoice',
   authenticate,

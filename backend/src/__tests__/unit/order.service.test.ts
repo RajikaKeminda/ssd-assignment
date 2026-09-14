@@ -16,6 +16,14 @@ import {
   validCreateOrderData,
 } from '../helpers/test-data.helper';
 
+// Requester identities used to exercise the object-level access-control
+// checks added to OrderService (see SECURITY.md #1). `asOwner` is the
+// patient who owns the seeded test order/`testIds.userId`; `asAdmin` is
+// used wherever the test only cares about existence, not ownership.
+const asOwner = { userId: testIds.userId.toString(), role: 'Patient' };
+const asAdmin = { userId: new mongoose.Types.ObjectId().toString(), role: 'System Admin' };
+const asDeliveryPartner = { userId: testIds.deliveryPartnerId.toString(), role: 'Delivery Partner' };
+
 beforeAll(async () => {
   await connectTestDB();
 });
@@ -285,7 +293,7 @@ describe('OrderService.getOrderById', () => {
   });
 
   it('should return a specific order by ID', async () => {
-    const order = await OrderService.getOrderById(testIds.orderId.toString());
+    const order = await OrderService.getOrderById(testIds.orderId.toString(), asOwner);
 
     expect(order).toBeDefined();
     expect(order.orderNumber).toBe('ORD-2026-000001');
@@ -295,7 +303,15 @@ describe('OrderService.getOrderById', () => {
   it('should throw NOT_FOUND for non-existent order', async () => {
     const fakeId = new mongoose.Types.ObjectId().toString();
 
-    await expect(OrderService.getOrderById(fakeId)).rejects.toThrow('Order not found');
+    await expect(OrderService.getOrderById(fakeId, asAdmin)).rejects.toThrow('Order not found');
+  });
+
+  it('should throw FORBIDDEN when a different patient requests the order', async () => {
+    const otherPatient = { userId: new mongoose.Types.ObjectId().toString(), role: 'Patient' };
+
+    await expect(
+      OrderService.getOrderById(testIds.orderId.toString(), otherPatient)
+    ).rejects.toThrow('You do not have permission to access this order');
   });
 });
 
@@ -475,8 +491,8 @@ describe('OrderService.processPayment', () => {
 
   it('should process payment successfully via Stripe', async () => {
     const order = await OrderService.processPayment(testIds.orderId.toString(), {
-      paymentMethod: PaymentMethod.CARD,
-    });
+        paymentMethod: PaymentMethod.CARD,
+      }, asOwner);
 
     expect(order.paymentStatus).toBe(PaymentStatus.PAID);
     expect(order.paymentMethod).toBe(PaymentMethod.CARD);
@@ -492,7 +508,7 @@ describe('OrderService.processPayment', () => {
     await expect(
       OrderService.processPayment(testIds.orderId.toString(), {
         paymentMethod: PaymentMethod.CARD,
-      })
+      }, asOwner)
     ).rejects.toThrow('Order has already been paid');
   });
 
@@ -504,7 +520,7 @@ describe('OrderService.processPayment', () => {
     await expect(
       OrderService.processPayment(testIds.orderId.toString(), {
         paymentMethod: PaymentMethod.CARD,
-      })
+      }, asOwner)
     ).rejects.toThrow('Cannot process payment for a cancelled order');
   });
 
@@ -512,7 +528,7 @@ describe('OrderService.processPayment', () => {
     const fakeId = new mongoose.Types.ObjectId().toString();
 
     await expect(
-      OrderService.processPayment(fakeId, { paymentMethod: PaymentMethod.CARD })
+      OrderService.processPayment(fakeId, { paymentMethod: PaymentMethod.CARD }, asAdmin)
     ).rejects.toThrow('Order not found');
   });
 
@@ -524,7 +540,7 @@ describe('OrderService.processPayment', () => {
     await expect(
       OrderService.processPayment(testIds.orderId.toString(), {
         paymentMethod: PaymentMethod.CARD,
-      })
+      }, asOwner)
     ).rejects.toThrow('Payment processing failed');
 
     const order = await Order.findById(testIds.orderId);
@@ -694,12 +710,11 @@ describe('OrderService.getUserOrders', () => {
   });
 
   it('should return orders for a specific user', async () => {
-    const result = await OrderService.getUserOrders(testIds.userId.toString(), {
-      page: 1,
-      limit: 10,
-      sortBy: 'createdAt',
-      sortOrder: 'desc',
-    });
+    const result = await OrderService.getUserOrders(
+      testIds.userId.toString(),
+      { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'desc' },
+      asOwner
+    );
 
     expect(result.orders).toHaveLength(2);
     expect(result.total).toBe(2);
@@ -707,15 +722,26 @@ describe('OrderService.getUserOrders', () => {
 
   it('should return empty results for a user with no orders', async () => {
     const noOrderUserId = new mongoose.Types.ObjectId().toString();
-    const result = await OrderService.getUserOrders(noOrderUserId, {
-      page: 1,
-      limit: 10,
-      sortBy: 'createdAt',
-      sortOrder: 'desc',
-    });
+    const result = await OrderService.getUserOrders(
+      noOrderUserId,
+      { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'desc' },
+      asAdmin
+    );
 
     expect(result.orders).toHaveLength(0);
     expect(result.total).toBe(0);
+  });
+
+  it('should throw FORBIDDEN when a patient requests another patient\'s history', async () => {
+    const otherPatient = { userId: new mongoose.Types.ObjectId().toString(), role: 'Patient' };
+
+    await expect(
+      OrderService.getUserOrders(
+        testIds.userId.toString(),
+        { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'desc' },
+        otherPatient
+      )
+    ).rejects.toThrow('You can only view your own order history');
   });
 });
 
@@ -831,7 +857,7 @@ describe('OrderService.getDeliveryTracking', () => {
   });
 
   it('should return delivery tracking information', async () => {
-    const result = await OrderService.getDeliveryTracking(testIds.orderId.toString());
+    const result = await OrderService.getDeliveryTracking(testIds.orderId.toString(), asOwner);
 
     expect(result.order).toBeDefined();
     expect(result.trackingUpdates).toHaveLength(1);
@@ -841,7 +867,7 @@ describe('OrderService.getDeliveryTracking', () => {
   it('should throw NOT_FOUND for non-existent order', async () => {
     const fakeId = new mongoose.Types.ObjectId().toString();
 
-    await expect(OrderService.getDeliveryTracking(fakeId)).rejects.toThrow(
+    await expect(OrderService.getDeliveryTracking(fakeId, asAdmin)).rejects.toThrow(
       'Order not found'
     );
   });
@@ -858,7 +884,7 @@ describe('OrderService.generateInvoice', () => {
   });
 
   it('should generate a PDF buffer and invoice URL for an order', async () => {
-    const result = await OrderService.generateInvoice(testIds.orderId.toString());
+    const result = await OrderService.generateInvoice(testIds.orderId.toString(), asOwner);
 
     expect(result.buffer).toBeInstanceOf(Buffer);
     expect(result.buffer.length).toBeGreaterThan(0);
@@ -868,7 +894,7 @@ describe('OrderService.generateInvoice', () => {
   it('should throw NOT_FOUND for non-existent order', async () => {
     const fakeId = new mongoose.Types.ObjectId().toString();
 
-    await expect(OrderService.generateInvoice(fakeId)).rejects.toThrow(
+    await expect(OrderService.generateInvoice(fakeId, asAdmin)).rejects.toThrow(
       'Order not found'
     );
   });
@@ -889,7 +915,8 @@ describe('OrderService.getDeliveryPartnerOrders', () => {
   it('should return orders assigned to a delivery partner', async () => {
     const result = await OrderService.getDeliveryPartnerOrders(
       testIds.deliveryPartnerId.toString(),
-      { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'desc' }
+      { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'desc' },
+      asDeliveryPartner
     );
 
     expect(result.orders).toHaveLength(1);
@@ -898,14 +925,25 @@ describe('OrderService.getDeliveryPartnerOrders', () => {
 
   it('should return empty results for partner with no assignments', async () => {
     const fakePartnerId = new mongoose.Types.ObjectId().toString();
-    const result = await OrderService.getDeliveryPartnerOrders(fakePartnerId, {
-      page: 1,
-      limit: 10,
-      sortBy: 'createdAt',
-      sortOrder: 'desc',
-    });
+    const result = await OrderService.getDeliveryPartnerOrders(
+      fakePartnerId,
+      { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'desc' },
+      asAdmin
+    );
 
     expect(result.orders).toHaveLength(0);
     expect(result.total).toBe(0);
+  });
+
+  it('should throw FORBIDDEN when a delivery partner requests another partner\'s orders', async () => {
+    const otherPartner = { userId: new mongoose.Types.ObjectId().toString(), role: 'Delivery Partner' };
+
+    await expect(
+      OrderService.getDeliveryPartnerOrders(
+        testIds.deliveryPartnerId.toString(),
+        { page: 1, limit: 10, sortBy: 'createdAt', sortOrder: 'desc' },
+        otherPartner
+      )
+    ).rejects.toThrow('You can only view your own deliveries');
   });
 });

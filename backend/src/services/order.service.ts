@@ -27,9 +27,63 @@ interface OrderFilter {
   paymentStatus?: string;
 }
 
+/**
+ * Identity of the user making the request, used for object-level
+ * access-control checks (see `assertOrderAccess`).
+ */
+export interface RequestingUser {
+  userId: string;
+  role: string;
+}
+
+const STAFF_ROLES = ['Pharmacy Staff', 'System Admin'];
+
 const TAX_RATE = 0.05;
 
+/**
+ * Normalizes a Mongoose reference field to its ObjectId string, whether
+ * or not it has been `.populate()`d (a populated field is a full
+ * sub-document, not an ObjectId, so a plain `.toString()` would not
+ * reliably return the id).
+ */
+function refId(value: unknown): string | undefined {
+  if (!value) return undefined;
+  if (typeof value === 'object' && '_id' in (value as Record<string, unknown>)) {
+    return String((value as { _id: unknown })._id);
+  }
+  return String(value);
+}
+
 export class OrderService {
+  /**
+   * Object-level access control for a single order (fixes IDOR — see
+   * SECURITY.md "Broken Access Control on Order Endpoints").
+   *
+   * - System Admin and Pharmacy Staff may access any order (staff need
+   *   this for fulfilment/support; admin for oversight).
+   * - A Patient may only access an order that belongs to them.
+   * - A Delivery Partner may only access an order assigned to them.
+   * - Anyone else (or an unauthenticated caller) is forbidden.
+   */
+  private static assertOrderAccess(
+    order: { userId?: unknown; deliveryPartnerId?: unknown },
+    requester: RequestingUser
+  ): void {
+    if (STAFF_ROLES.includes(requester.role)) return;
+
+    if (requester.role === 'Patient' && refId(order.userId) === requester.userId) return;
+
+    if (
+      requester.role === 'Delivery Partner' &&
+      order.deliveryPartnerId &&
+      refId(order.deliveryPartnerId) === requester.userId
+    ) {
+      return;
+    }
+
+    throw ApiError.forbidden('You do not have permission to access this order');
+  }
+
   /**
    * Generate a unique order number in the format ORD-YYYY-XXXXXX
    */
@@ -184,7 +238,7 @@ export class OrderService {
     };
   }
 
-  static async getOrderById(orderId: string): Promise<IOrder> {
+  static async getOrderById(orderId: string, requester: RequestingUser): Promise<IOrder> {
     const order = await Order.findById(orderId)
       .populate('userId', 'name email phone')
       .populate('pharmacyId', 'name location contactInfo')
@@ -193,6 +247,8 @@ export class OrderService {
     if (!order) {
       throw ApiError.notFound('Order not found');
     }
+
+    this.assertOrderAccess(order, requester);
 
     return order;
   }
@@ -274,11 +330,17 @@ export class OrderService {
    */
   static async processPayment(
     orderId: string,
-    data: ProcessPaymentInput
+    data: ProcessPaymentInput,
+    requester: RequestingUser
   ): Promise<IOrder> {
     const order = await Order.findById(orderId);
     if (!order) {
       throw ApiError.notFound('Order not found');
+    }
+
+    // Only the owning patient (or staff/admin acting on their behalf) may pay.
+    if (requester.role === 'Patient' && order.userId?.toString() !== requester.userId) {
+      throw ApiError.forbidden('You can only pay for your own orders');
     }
 
     if (order.paymentStatus === PaymentStatus.PAID) {
@@ -385,7 +447,16 @@ export class OrderService {
     }
   }
 
-  static async getUserOrders(userId: string, pagination: PaginationOptions) {
+  static async getUserOrders(
+    userId: string,
+    pagination: PaginationOptions,
+    requester: RequestingUser
+  ) {
+    // A patient may only list their own order history; admins may list anyone's.
+    if (requester.role === 'Patient' && requester.userId !== userId) {
+      throw ApiError.forbidden('You can only view your own order history');
+    }
+
     const { page, limit, sortBy, sortOrder } = pagination;
     const skip = (page - 1) * limit;
 
@@ -441,7 +512,7 @@ export class OrderService {
     return order.populate('deliveryPartnerId', 'name email phone');
   }
 
-  static async getDeliveryTracking(orderId: string): Promise<{
+  static async getDeliveryTracking(orderId: string, requester: RequestingUser): Promise<{
     order: IOrder;
     trackingUpdates: IOrder['trackingUpdates'];
   }> {
@@ -454,10 +525,15 @@ export class OrderService {
       throw ApiError.notFound('Order not found');
     }
 
+    this.assertOrderAccess(order, requester);
+
     return { order, trackingUpdates: order.trackingUpdates };
   }
 
-  static async generateInvoice(orderId: string): Promise<{ buffer: Buffer; orderNumber: string }> {
+  static async generateInvoice(
+    orderId: string,
+    requester: RequestingUser
+  ): Promise<{ buffer: Buffer; orderNumber: string }> {
     const order = await Order.findById(orderId)
       .populate<{ userId: { name: string; email: string; phone?: string } }>('userId', 'name email phone')
       .populate<{ pharmacyId: { name: string; contactInfo?: { email?: string; phone?: string } } }>('pharmacyId', 'name contactInfo');
@@ -465,6 +541,8 @@ export class OrderService {
     if (!order) {
       throw ApiError.notFound('Order not found');
     }
+
+    this.assertOrderAccess(order, requester);
 
     const buffer = await new Promise<Buffer>((resolve, reject) => {
       const doc = new PDFDocument({ margin: 50, size: 'A4' });
@@ -645,8 +723,17 @@ export class OrderService {
 
   static async getDeliveryPartnerOrders(
     partnerId: string,
-    pagination: PaginationOptions
+    pagination: PaginationOptions,
+    requester: RequestingUser
   ) {
+    // A delivery partner may only list their own assignments; staff/admin may list anyone's.
+    if (requester.role === 'Delivery Partner' && requester.userId !== partnerId) {
+      throw ApiError.forbidden('You can only view your own deliveries');
+    }
+    if (!STAFF_ROLES.includes(requester.role) && requester.role !== 'Delivery Partner') {
+      throw ApiError.forbidden('You do not have permission to view delivery partner orders');
+    }
+
     const { page, limit, sortBy, sortOrder } = pagination;
     const skip = (page - 1) * limit;
 

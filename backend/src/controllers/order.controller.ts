@@ -37,7 +37,11 @@ export class OrderController {
 
   static async getOrderById(req: Request, res: Response, next: NextFunction) {
     try {
-      const order = await OrderService.getOrderById(String(req.params.id));
+      if (!req.user) throw ApiError.unauthorized();
+      const order = await OrderService.getOrderById(String(req.params.id), {
+        userId: String(req.user._id),
+        role: req.user.role,
+      });
       ApiResponse.success(res, order, 'Order retrieved successfully');
     } catch (error) {
       next(error);
@@ -64,7 +68,11 @@ export class OrderController {
 
   static async processPayment(req: Request, res: Response, next: NextFunction) {
     try {
-      const order = await OrderService.processPayment(String(req.params.id), req.body);
+      if (!req.user) throw ApiError.unauthorized();
+      const order = await OrderService.processPayment(String(req.params.id), req.body, {
+        userId: String(req.user._id),
+        role: req.user.role,
+      });
       ApiResponse.success(res, order, 'Payment processed successfully');
     } catch (error) {
       next(error);
@@ -97,13 +105,18 @@ export class OrderController {
 
   static async getUserOrders(req: Request, res: Response, next: NextFunction) {
     try {
+      if (!req.user) throw ApiError.unauthorized();
       const { page, limit, sortBy, sortOrder } = req.query;
-      const result = await OrderService.getUserOrders(String(req.params.userId), {
-        page: parseInt(String(page ?? '1')),
-        limit: parseInt(String(limit ?? '10')),
-        sortBy: String(sortBy ?? 'createdAt'),
-        sortOrder: (String(sortOrder ?? 'desc')) as 'asc' | 'desc',
-      });
+      const result = await OrderService.getUserOrders(
+        String(req.params.userId),
+        {
+          page: parseInt(String(page ?? '1')),
+          limit: parseInt(String(limit ?? '10')),
+          sortBy: String(sortBy ?? 'createdAt'),
+          sortOrder: (String(sortOrder ?? 'desc')) as 'asc' | 'desc',
+        },
+        { userId: String(req.user._id), role: req.user.role }
+      );
       ApiResponse.success(res, result, 'User orders retrieved successfully');
     } catch (error) {
       next(error);
@@ -136,7 +149,11 @@ export class OrderController {
 
   static async getDeliveryTracking(req: Request, res: Response, next: NextFunction) {
     try {
-      const tracking = await OrderService.getDeliveryTracking(String(req.params.id));
+      if (!req.user) throw ApiError.unauthorized();
+      const tracking = await OrderService.getDeliveryTracking(String(req.params.id), {
+        userId: String(req.user._id),
+        role: req.user.role,
+      });
       ApiResponse.success(res, tracking, 'Tracking info retrieved successfully');
     } catch (error) {
       next(error);
@@ -145,7 +162,11 @@ export class OrderController {
 
   static async generateInvoice(req: Request, res: Response, next: NextFunction) {
     try {
-      const { buffer, orderNumber } = await OrderService.generateInvoice(String(req.params.id));
+      if (!req.user) throw ApiError.unauthorized();
+      const { buffer, orderNumber } = await OrderService.generateInvoice(String(req.params.id), {
+        userId: String(req.user._id),
+        role: req.user.role,
+      });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="invoice-${orderNumber}.pdf"`);
       res.setHeader('Content-Length', buffer.length);
@@ -157,13 +178,18 @@ export class OrderController {
 
   static async getDeliveryPartnerOrders(req: Request, res: Response, next: NextFunction) {
     try {
+      if (!req.user) throw ApiError.unauthorized();
       const { page, limit, sortBy, sortOrder } = req.query;
-      const result = await OrderService.getDeliveryPartnerOrders(String(req.params.partnerId), {
-        page: parseInt(String(page ?? '1')),
-        limit: parseInt(String(limit ?? '10')),
-        sortBy: String(sortBy ?? 'createdAt'),
-        sortOrder: (String(sortOrder ?? 'desc')) as 'asc' | 'desc',
-      });
+      const result = await OrderService.getDeliveryPartnerOrders(
+        String(req.params.partnerId),
+        {
+          page: parseInt(String(page ?? '1')),
+          limit: parseInt(String(limit ?? '10')),
+          sortBy: String(sortBy ?? 'createdAt'),
+          sortOrder: (String(sortOrder ?? 'desc')) as 'asc' | 'desc',
+        },
+        { userId: String(req.user._id), role: req.user.role }
+      );
       ApiResponse.success(res, result, 'Delivery partner orders retrieved successfully');
     } catch (error) {
       next(error);
