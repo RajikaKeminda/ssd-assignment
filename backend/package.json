@@ -16,7 +16,8 @@
     "test:perf:seed": "node src/__tests__/performance/seed-perf-data.js",
     "test:perf": "artillery run src/__tests__/performance/order.perf.yml",
     "test:perf:requests": "artillery run src/__tests__/performance/request.perf.yml",
-    "test:perf:inventory": "artillery run src/__tests__/performance/inventory.perf.yml"
+    "test:perf:inventory": "artillery run src/__tests__/performance/inventory.perf.yml",
+    "bootstrap:admin": "ts-node src/scripts/bootstrap-admin.ts"
   },
   "keywords": [
     "pharmacy",

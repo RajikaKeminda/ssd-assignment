@@ -4,13 +4,14 @@ import { useAuth } from '../context/useAuth'
 import { ApiClientError } from '../api/client'
 import { AuthScenery } from '../components/AuthScenery'
 
-const ROLES = [
-  { value: 'Patient', label: 'Patient' },
-  { value: 'Pharmacy Staff', label: 'Pharmacy staff' },
-  { value: 'Delivery Partner', label: 'Delivery partner' },
-  { value: 'System Admin', label: 'System admin' },
-]
-
+// SECURITY FIX (Privilege Escalation via Mass Assignment — see
+// SECURITY.md #2): this form used to let anyone pick "System Admin" (or
+// Pharmacy Staff / Delivery Partner) from a dropdown and self-register with
+// that role — the backend trusted it completely. Public sign-up now only
+// ever creates a Patient account (POST /auth/register hardcodes this
+// server-side too, so removing the field here is a UX fix, not the actual
+// security boundary). Staff/admin accounts are created by an existing
+// System Admin via POST /auth/staff instead.
 const inputClass =
   'mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-emerald-400 dark:focus:ring-emerald-400/20'
 
@@ -32,7 +33,6 @@ export function Signup() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [phone, setPhone] = useState('')
-  const [role, setRole] = useState('Patient')
   const [error, setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState({})
   const [loading, setLoading] = useState(false)
@@ -49,14 +49,13 @@ export function Signup() {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         password,
-        role,
         ...(phone.trim() ? { phone: phone.trim() } : {}),
       })
       navigate('/', { replace: true })
     } catch (err) {
       if (err instanceof ApiClientError && err.details?.length) {
         const next = {}
-        for (const key of ['name', 'email', 'password', 'role', 'phone']) {
+        for (const key of ['name', 'email', 'password', 'phone']) {
           const m = formatFieldError(err.details, key)
           if (m) next[key] = m
         }
@@ -186,27 +185,11 @@ export function Signup() {
               ) : null}
             </label>
 
-            <label className="block text-left">
-              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                Role
-              </span>
-              <select
-                name="role"
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-                className={`${inputClass} cursor-pointer`}
-                aria-invalid={Boolean(fieldErrors.role)}
-              >
-                {ROLES.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-              {fieldErrors.role ? (
-                <span className={`mt-1 block ${errText}`}>{fieldErrors.role}</span>
-              ) : null}
-            </label>
+            <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-500">
+              This creates a Patient account. Pharmacy staff, delivery
+              partner, and admin accounts are created by a System Admin from
+              within the app.
+            </p>
 
             <button
               type="submit"

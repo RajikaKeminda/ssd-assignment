@@ -16,6 +16,24 @@ export class AuthController {
     }
   }
 
+  /**
+   * Admin-only endpoint for creating privileged accounts (Pharmacy Staff,
+   * Delivery Partner, System Admin). See SECURITY.md #2 — this replaces the
+   * old behaviour where /auth/register accepted an arbitrary `role`.
+   */
+  static async registerStaff(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { user, tokens } = await AuthService.registerStaff(req.body);
+      ApiResponse.created(res, {
+        user,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+      }, 'Staff account created successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async login(req: Request, res: Response, next: NextFunction) {
     try {
       const { user, tokens } = await AuthService.login(req.body);

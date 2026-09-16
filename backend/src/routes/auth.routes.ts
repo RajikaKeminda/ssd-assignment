@@ -1,7 +1,15 @@
 import { Router } from 'express';
 import { AuthController } from '../controllers/auth.controller';
 import { validate } from '../middlewares/validate.middleware';
-import { registerSchema, loginSchema, refreshTokenSchema } from '../validators/auth.validator';
+import { authenticate } from '../middlewares/auth.middleware';
+import { authorize } from '../middlewares/rbac.middleware';
+import { UserRole } from '../models/user.model';
+import {
+  registerSchema,
+  registerStaffSchema,
+  loginSchema,
+  refreshTokenSchema,
+} from '../validators/auth.validator';
 
 const router = Router();
 
@@ -122,7 +130,38 @@ const router = Router();
  *       409:
  *         description: Email already exists
  */
+// SECURITY FIX (Privilege Escalation via Mass Assignment — see SECURITY.md
+// #2): this endpoint used to accept a client-supplied `role` field
+// (Patient / Pharmacy Staff / Delivery Partner / System Admin) with no
+// authorization check at all, so anyone could self-register as System
+// Admin. Public registration is now hardcoded to the Patient role — see
+// POST /auth/staff below for how privileged accounts get created instead.
 router.post('/register', validate(registerSchema), AuthController.register);
+
+/**
+ * @swagger
+ * /auth/staff:
+ *   post:
+ *     summary: Create a privileged account (Pharmacy Staff, Delivery Partner, or System Admin)
+ *     description: >
+ *       Restricted to System Admins. Introduced as part of the fix for the
+ *       role mass-assignment vulnerability in /auth/register — see SECURITY.md #2.
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       201:
+ *         description: Staff account created successfully
+ *       403:
+ *         description: Forbidden — System Admin role required
+ */
+router.post(
+  '/staff',
+  authenticate,
+  authorize(UserRole.SYSTEM_ADMIN),
+  validate(registerStaffSchema),
+  AuthController.registerStaff
+);
 
 /**
  * @swagger

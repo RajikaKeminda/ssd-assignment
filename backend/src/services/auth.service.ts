@@ -4,7 +4,7 @@ import { User, IUser, UserRole } from '../models/user.model';
 import { RefreshToken } from '../models/refresh-token.model';
 import { env } from '../config/env';
 import { ApiError } from '../utils/api-error';
-import { RegisterInput, LoginInput } from '../validators/auth.validator';
+import { RegisterInput, RegisterStaffInput, LoginInput } from '../validators/auth.validator';
 
 interface TokenPair {
   accessToken: string;
@@ -46,6 +46,13 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
+  /**
+   * Public self-registration. SECURITY FIX (Privilege Escalation via Mass
+   * Assignment — see SECURITY.md #2): the role is hardcoded to Patient here
+   * rather than trusted from client input, even though registerSchema no
+   * longer exposes a `role` field either — belt-and-suspenders so this
+   * method is safe to call regardless of how the input was validated.
+   */
   static async register(data: RegisterInput): Promise<{ user: IUser; tokens: TokenPair }> {
     const existingUser = await User.findOne({ email: data.email });
     if (existingUser) {
@@ -56,8 +63,38 @@ export class AuthService {
       name: data.name,
       email: data.email,
       password: data.password,
-      role: data.role || UserRole.PATIENT,
+      role: UserRole.PATIENT,
       phone: data.phone,
+    });
+
+    const tokens = await this.generateTokenPair(String(user._id), user.role);
+
+    return { user, tokens };
+  }
+
+  /**
+   * Privileged account creation (Pharmacy Staff / Delivery Partner / System
+   * Admin). SECURITY FIX (Privilege Escalation — see SECURITY.md #2): this
+   * is the ONLY way to create a non-Patient account, and the route wiring
+   * this up (POST /auth/staff) requires an authenticated System Admin —
+   * so granting elevated roles is now an explicit admin action instead of
+   * something any anonymous caller could self-serve at signup.
+   */
+  static async registerStaff(
+    data: RegisterStaffInput
+  ): Promise<{ user: IUser; tokens: TokenPair }> {
+    const existingUser = await User.findOne({ email: data.email });
+    if (existingUser) {
+      throw ApiError.conflict('A user with this email already exists');
+    }
+
+    const user = await User.create({
+      name: data.name,
+      email: data.email,
+      password: data.password,
+      role: data.role,
+      phone: data.phone,
+      pharmacyId: data.pharmacyId,
     });
 
     const tokens = await this.generateTokenPair(String(user._id), user.role);
