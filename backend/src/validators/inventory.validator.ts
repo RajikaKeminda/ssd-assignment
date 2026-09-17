@@ -95,7 +95,10 @@ export const getInventoryQuerySchema = z.object({
     query: z.object({
         pharmacyId: z.string().regex(objectIdRegex).optional(),
         category: z.nativeEnum(MedicationCategory).optional(),
-        search: z.string().trim().optional(),
+        // SECURITY FIX (ReDoS — see SECURITY.md #4): cap search length; the
+        // real fix (escaping) lives in InventoryService.getAll, this is
+        // defense-in-depth against oversized inputs.
+        search: z.string().trim().max(100).optional(),
         requiresPrescription: z
             .string()
             .optional()

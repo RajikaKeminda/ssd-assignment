@@ -11,6 +11,7 @@ import {
   GetReviewsQueryInput,
 } from '../validators/pharmacy.validator';
 import { GeocodingService } from './geocoding.service';
+import { escapeRegex } from '../utils/regex';
 
 interface PaginationResult<T> {
   items: T[];
@@ -82,7 +83,9 @@ export class PharmacyService {
       mongoQuery.isVerified = isVerified;
     }
     if (city) {
-      mongoQuery['location.city'] = new RegExp(`^${city}$`, 'i');
+      // SECURITY FIX (ReDoS via Unsanitized Regex — see SECURITY.md #4):
+      // `city` was interpolated into a RegExp unescaped.
+      mongoQuery['location.city'] = new RegExp(`^${escapeRegex(city)}$`, 'i');
     }
     if (search) {
       mongoQuery.$text = { $search: search };

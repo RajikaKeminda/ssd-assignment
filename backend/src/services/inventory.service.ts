@@ -4,6 +4,7 @@ import { Inventory, IInventory } from '../models/inventory.model';
 import { DrugValidationService } from './drug-validation.service';
 import { ApiError } from '../utils/api-error';
 import { logger } from '../utils/logger';
+import { escapeRegex } from '../utils/regex';
 import {
     CreateInventoryInput,
     UpdateInventoryInput,
@@ -34,9 +35,11 @@ export class InventoryService {
         );
 
         // Check for duplicate medication in the same pharmacy
+        // SECURITY FIX (ReDoS — see SECURITY.md #4): escape the user-supplied
+        // medication name before embedding it in a RegExp.
         const existing = await Inventory.findOne({
             pharmacyId: new mongoose.Types.ObjectId(data.pharmacyId),
-            medicationName: { $regex: new RegExp(`^${data.medicationName}$`, 'i') },
+            medicationName: { $regex: new RegExp(`^${escapeRegex(data.medicationName)}$`, 'i') },
         });
 
         if (existing) {
@@ -81,10 +84,17 @@ export class InventoryService {
             filter.requiresPrescription = query.requiresPrescription;
         }
         if (query.search) {
+            // SECURITY FIX (ReDoS via Unsanitized Regex — see SECURITY.md #4):
+            // `query.search` used to be interpolated into $regex unescaped, so
+            // a crafted pattern (catastrophic backtracking) could hang the
+            // event loop for every request hitting this endpoint. Escaping it
+            // makes the search always literal, which is also the behavior a
+            // "search" box should have in the first place.
+            const safeSearch = escapeRegex(query.search);
             filter.$or = [
-                { medicationName: { $regex: query.search, $options: 'i' } },
-                { genericName: { $regex: query.search, $options: 'i' } },
-                { manufacturer: { $regex: query.search, $options: 'i' } },
+                { medicationName: { $regex: safeSearch, $options: 'i' } },
+                { genericName: { $regex: safeSearch, $options: 'i' } },
+                { manufacturer: { $regex: safeSearch, $options: 'i' } },
             ];
         }
 

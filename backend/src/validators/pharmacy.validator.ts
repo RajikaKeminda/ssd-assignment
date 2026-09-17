@@ -141,7 +141,9 @@ export const getPharmaciesQuerySchema = z.object({
       .string()
       .optional()
       .transform((v) => (v === undefined ? undefined : v === 'true')),
-    search: z.string().trim().optional(),
+    // SECURITY FIX (ReDoS — see SECURITY.md #4): cap search length; the real
+    // fix (escaping) lives in PharmacyService.getPharmacies.
+    search: z.string().trim().max(100).optional(),
     page: z.string().regex(/^\d+$/).optional().default('1'),
     limit: z.string().regex(/^\d+$/).optional().default('10'),
     sortBy: z.string().optional().default('createdAt'),
