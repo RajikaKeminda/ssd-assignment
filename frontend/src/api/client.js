@@ -10,6 +10,36 @@ export class ApiClientError extends Error {
   }
 }
 
+// SECURITY FIX (Sensitive Tokens Stored in localStorage — see
+// SECURITY.md #5): the access token used to be persisted to
+// `localStorage.accessToken` and the refresh token to
+// `localStorage.refreshToken`. Anything written to localStorage is
+// readable by any JavaScript running on the page, so a single XSS bug
+// (in this app or in any of its dependencies) would let an attacker read
+// both tokens and mint themselves a persistent session.
+//
+// The refresh token no longer reaches the browser's JavaScript at all — the
+// backend sets it as an httpOnly cookie (see auth.controller.ts), which is
+// automatically attached to same-origin requests made with
+// `credentials: 'include'` below, and simply cannot be read by `document`/
+// `localStorage`/any script.
+//
+// The (short-lived, 15-minute) access token is still visible to JS because
+// it has to be — it's sent as an Authorization header — but it now only
+// ever lives in this module-level variable, never in Storage. It's wiped
+// from memory on every full page reload, which is why AuthProvider calls
+// `/auth/refresh` once on mount to silently re-establish it from the
+// httpOnly cookie.
+let inMemoryAccessToken = null
+
+export function setAccessToken(token) {
+  inMemoryAccessToken = token
+}
+
+export function getAccessToken() {
+  return inMemoryAccessToken
+}
+
 /** Tracks whether a token refresh is already in flight */
 let isRefreshing = false
 
@@ -25,15 +55,12 @@ function processQueue(error, token = null) {
 }
 
 async function attemptRefresh() {
-  const refreshToken = localStorage.getItem('refreshToken')
-  if (!refreshToken) {
-    throw new ApiClientError('No refresh token available', { status: 401 })
-  }
-
+  // No body needed — the refresh token travels via the httpOnly cookie,
+  // sent automatically because of `credentials: 'include'`.
   const res = await fetch(`${API_BASE}/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
+    credentials: 'include',
   })
 
   const json = await res.json().catch(() => ({}))
@@ -41,9 +68,8 @@ async function attemptRefresh() {
     throw new ApiClientError('Session expired. Please log in again.', { status: 401 })
   }
 
-  const { accessToken, refreshToken: newRefreshToken } = json.data
-  localStorage.setItem('accessToken', accessToken)
-  if (newRefreshToken) localStorage.setItem('refreshToken', newRefreshToken)
+  const { accessToken } = json.data
+  setAccessToken(accessToken)
   return accessToken
 }
 
@@ -53,6 +79,7 @@ async function retryRequest(path, method, headers, body, rest, newToken) {
     method,
     headers: retryHeaders,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    credentials: 'include',
     ...rest,
   })
   const json = await res.json().catch(() => ({}))
@@ -76,7 +103,7 @@ export async function apiRequest(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...extraHeaders }
 
   if (!skipAuth) {
-    const access = localStorage.getItem('accessToken')
+    const access = getAccessToken()
     if (access) headers.Authorization = `Bearer ${access}`
   }
 
@@ -84,6 +111,9 @@ export async function apiRequest(path, options = {}) {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    // Always send the httpOnly refresh-token cookie on same-site requests
+    // (safe to include even on requests that don't need it).
+    credentials: 'include',
     ...rest,
   })
 
@@ -103,8 +133,7 @@ export async function apiRequest(path, options = {}) {
       return retryRequest(path, method, headers, body, rest, newToken)
     } catch (err) {
       processQueue(err)
-      localStorage.removeItem('accessToken')
-      localStorage.removeItem('refreshToken')
+      setAccessToken(null)
       localStorage.removeItem('mts_user')
       // Signal AuthProvider to clear its React state
       window.dispatchEvent(new CustomEvent('auth:sessionExpired'))

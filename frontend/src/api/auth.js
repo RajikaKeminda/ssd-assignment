@@ -16,18 +16,20 @@ export function login(payload) {
   })
 }
 
-export function logoutRequest(refreshToken) {
+// SECURITY FIX (see SECURITY.md #5): logout/refresh no longer take a
+// refreshToken argument — it now travels as an httpOnly cookie the browser
+// attaches automatically (apiRequest always sends `credentials: 'include'`),
+// rather than being read out of localStorage by this code.
+export function logoutRequest() {
   return apiRequest('/auth/logout', {
     method: 'POST',
-    body: { refreshToken },
     skipAuth: true,
   })
 }
 
-export function refreshTokens(refreshToken) {
+export function refreshTokens() {
   return apiRequest('/auth/refresh', {
     method: 'POST',
-    body: { refreshToken },
     skipAuth: true,
   })
 }

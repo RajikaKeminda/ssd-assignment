@@ -93,11 +93,14 @@ export const loginSchema = z.object({
   }),
 });
 
+// SECURITY FIX (see SECURITY.md #5): the refresh token now travels primarily
+// as an httpOnly cookie set by login/register/refresh, so it's no longer
+// required in the body — AuthController.refreshToken/logout fall back to
+// the body only for non-browser clients that can't use cookies, and reject
+// the request if neither is present.
 export const refreshTokenSchema = z.object({
   body: z.object({
-    refreshToken: z
-      .string({ required_error: 'Refresh token is required' })
-      .min(1, 'Refresh token is required'),
+    refreshToken: z.string().min(1).optional(),
   }),
 });
 

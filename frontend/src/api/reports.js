@@ -1,7 +1,15 @@
+import { getAccessToken } from './client'
+
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
 
+// SECURITY FIX (Sensitive Tokens Stored in localStorage — see
+// SECURITY.md #5): this used to read the access token from localStorage,
+// which any script running on the page (e.g. via XSS) can read, turning a
+// single injection bug into full session theft. The access token now
+// lives only in memory (see api/client.js) and is never persisted to
+// localStorage/sessionStorage.
 function getAuthHeaders() {
-  const access = localStorage.getItem('accessToken')
+  const access = getAccessToken()
   return access ? { Authorization: `Bearer ${access}` } : {}
 }
 
@@ -17,6 +25,9 @@ function queryString(params) {
 async function downloadReport(endpoint, filename, params = {}) {
   const res = await fetch(`${API_BASE}/reports/${endpoint}${queryString(params)}`, {
     method: 'GET',
+    // SECURITY FIX (see SECURITY.md #5): send the httpOnly refresh-token
+    // cookie along with every request, matching the rest of the app.
+    credentials: 'include',
     headers: { ...getAuthHeaders() },
   })
 

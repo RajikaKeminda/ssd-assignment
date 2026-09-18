@@ -1,4 +1,4 @@
-import { apiRequest } from './client'
+import { apiRequest, getAccessToken } from './client'
 
 function queryString(params) {
   const q = new URLSearchParams()
@@ -61,10 +61,18 @@ export async function processPayment(id, body) {
 
 export async function downloadInvoice(id, orderNumber) {
   const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
-  const access = localStorage.getItem('accessToken')
+  // SECURITY FIX (Sensitive Tokens Stored in localStorage — see
+  // SECURITY.md #5): this used to read the access token from
+  // localStorage, which is readable by any script on the page (XSS →
+  // instant token theft). The access token now lives only in memory
+  // (see api/client.js), and the refresh token is an httpOnly cookie the
+  // browser attaches automatically — hence `credentials: 'include'`
+  // below, matching every other authenticated request in this app.
+  const access = getAccessToken()
 
   const res = await fetch(`${API_BASE}/orders/${id}/invoice`, {
     method: 'GET',
+    credentials: 'include',
     headers: { ...(access ? { Authorization: `Bearer ${access}` } : {}) },
   })
 
