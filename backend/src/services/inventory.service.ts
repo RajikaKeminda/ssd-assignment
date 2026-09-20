@@ -14,10 +14,45 @@ import {
 } from '../validators/inventory.validator';
 
 /**
+ * Identity of the user making the request, used for the cross-tenant
+ * object-level access-control checks below (see SECURITY.md #7).
+ */
+export interface RequestingUser {
+    userId: string;
+    role: string;
+    pharmacyId?: string;
+}
+
+/**
  * Service layer for Pharmacy Inventory Management.
  * Handles business logic, database operations, and third-party drug validation.
  */
 export class InventoryService {
+    /**
+     * SECURITY FIX (Cross-Tenant Broken Object-Level Authorization — see
+     * SECURITY.md #7): write operations (create/update/delete) used to trust
+     * whatever `pharmacyId` the client sent (create) or skip the check
+     * entirely (update/delete), so any account with the "Pharmacy Staff"
+     * role — a role anyone could hold once they have *a* staff account —
+     * could create, edit, or delete inventory belonging to a *different*
+     * pharmacy. System Admins are exempt (they legitimately manage all
+     * pharmacies); Pharmacy Staff are confined to their own `pharmacyId`.
+     */
+    private static assertOwnsPharmacy(pharmacyId: string, requester: RequestingUser): void {
+        if (requester.role === 'System Admin') return;
+
+        if (requester.role !== 'Pharmacy Staff') {
+            throw ApiError.forbidden('Only pharmacy staff or an admin may manage inventory');
+        }
+
+        if (!requester.pharmacyId) {
+            throw ApiError.forbidden('Your account is not linked to a pharmacy');
+        }
+
+        if (requester.pharmacyId !== pharmacyId) {
+            throw ApiError.forbidden('You can only manage inventory for your own pharmacy');
+        }
+    }
     /**
      * Create a new inventory item after validating the medication name
      * against the RxNorm drug database.
@@ -25,7 +60,12 @@ export class InventoryService {
      * @param data - Validated inventory item data
      * @returns The newly created inventory document
      */
-    static async create(data: CreateInventoryInput): Promise<IInventory> {
+    static async create(data: CreateInventoryInput, requester: RequestingUser): Promise<IInventory> {
+        // SECURITY FIX (Cross-Tenant BOLA — see SECURITY.md #7): validate
+        // that this requester is allowed to write to `data.pharmacyId`
+        // *before* touching the database.
+        this.assertOwnsPharmacy(data.pharmacyId, requester);
+
         // Validate medication name via RxNorm / mock drug database
         const drugInfo = await DrugValidationService.validateAndGetDrugInfo(
             data.medicationName
@@ -145,10 +185,24 @@ export class InventoryService {
      * @param data - Fields to update
      * @returns The updated inventory document
      */
-    static async update(id: string, data: UpdateInventoryInput): Promise<IInventory> {
+    static async update(
+        id: string,
+        data: UpdateInventoryInput,
+        requester: RequestingUser
+    ): Promise<IInventory> {
         if (!mongoose.Types.ObjectId.isValid(id)) {
             throw ApiError.badRequest('Invalid inventory item ID');
         }
+
+        // SECURITY FIX (Cross-Tenant BOLA — see SECURITY.md #7): this method
+        // used to update ANY inventory item by id with no ownership check at
+        // all, so any Pharmacy Staff account could silently edit a
+        // competitor pharmacy's stock levels, prices, or prescription flags.
+        const existingItem = await Inventory.findById(id);
+        if (!existingItem) {
+            throw ApiError.notFound('Inventory item not found');
+        }
+        this.assertOwnsPharmacy(String(existingItem.pharmacyId), requester);
 
         // If medication name is being changed, validate the new name
         if (data.medicationName) {
@@ -160,6 +214,10 @@ export class InventoryService {
             );
         }
 
+        // Note: updateInventorySchema (validators/inventory.validator.ts)
+        // never accepts `pharmacyId` in the body — moving an item to a
+        // different pharmacy is not a supported edit, which prevents staff
+        // from re-parenting inventory across tenants via this endpoint.
         const updateData: Record<string, unknown> = { ...data };
         if (data.expiryDate) {
             updateData.expiryDate = new Date(data.expiryDate);
@@ -183,10 +241,18 @@ export class InventoryService {
      * @param id - Inventory item ObjectId
      * @returns The deleted inventory document
      */
-    static async delete(id: string): Promise<IInventory> {
+    static async delete(id: string, requester: RequestingUser): Promise<IInventory> {
         if (!mongoose.Types.ObjectId.isValid(id)) {
             throw ApiError.badRequest('Invalid inventory item ID');
         }
+
+        // SECURITY FIX (Cross-Tenant BOLA — see SECURITY.md #7): previously
+        // any Pharmacy Staff account could delete any pharmacy's stock item.
+        const existingItem = await Inventory.findById(id);
+        if (!existingItem) {
+            throw ApiError.notFound('Inventory item not found');
+        }
+        this.assertOwnsPharmacy(String(existingItem.pharmacyId), requester);
 
         const item = await Inventory.findByIdAndDelete(id);
         if (!item) {

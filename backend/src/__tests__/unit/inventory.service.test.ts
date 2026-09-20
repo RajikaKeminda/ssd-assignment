@@ -12,6 +12,15 @@ import '../../models/pharmacy.model';
 // Set environment to mock mode so DrugValidationService uses mock DB
 process.env.RXNORM_API_BASE_URL = 'mock';
 
+// Requester identities for the cross-tenant object-level access-control
+// checks added to InventoryService (see SECURITY.md #7). `asAdmin` bypasses
+// the pharmacy-ownership check entirely, which is what most of the
+// pre-existing tests want (they're testing business logic, not authorization).
+// `asStaff` owns `testIds.pharmacyId` specifically, for tests that exercise
+// the new ownership check itself.
+const asAdmin = { userId: new mongoose.Types.ObjectId().toString(), role: 'System Admin' };
+const asStaff = { userId: new mongoose.Types.ObjectId().toString(), role: 'Pharmacy Staff', pharmacyId: testIds.pharmacyId.toString() };
+
 beforeAll(async () => {
     await connectTestDB();
 });
@@ -44,7 +53,7 @@ describe('InventoryService.create', () => {
     };
 
     it('should create an inventory item with valid data', async () => {
-        const item = await InventoryService.create(validInput as any);
+        const item = await InventoryService.create(validInput as any, asAdmin);
 
         expect(item).toBeDefined();
         expect(item.medicationName).toBe('Amoxicillin');
@@ -59,7 +68,7 @@ describe('InventoryService.create', () => {
         const input = { ...validInput };
         delete (input as any).genericName;
 
-        const item = await InventoryService.create(input as any);
+        const item = await InventoryService.create(input as any, asAdmin);
 
         expect(item.genericName).toBe('Amoxicillin'); // from mock DB fullGenericName
     });
@@ -68,7 +77,7 @@ describe('InventoryService.create', () => {
         const item = await InventoryService.create({
             ...validInput,
             genericName: 'Custom Generic Name',
-        } as any);
+        } as any, asAdmin);
 
         expect(item.genericName).toBe('Custom Generic Name');
     });
@@ -76,29 +85,29 @@ describe('InventoryService.create', () => {
     it('should validate medication name via DrugValidationService', async () => {
         const spy = jest.spyOn(DrugValidationService, 'validateAndGetDrugInfo');
 
-        await InventoryService.create(validInput as any);
+        await InventoryService.create(validInput as any, asAdmin);
 
         expect(spy).toHaveBeenCalledWith('Amoxicillin');
         expect(spy).toHaveBeenCalledTimes(1);
     });
 
     it('should throw conflict error for duplicate medication in same pharmacy', async () => {
-        await InventoryService.create(validInput as any);
+        await InventoryService.create(validInput as any, asAdmin);
 
-        await expect(InventoryService.create(validInput as any)).rejects.toThrow(
+        await expect(InventoryService.create(validInput as any, asAdmin)).rejects.toThrow(
             /already exists in this pharmacy/
         );
     });
 
     it('should allow same medication name in different pharmacies', async () => {
-        await InventoryService.create(validInput as any);
+        await InventoryService.create(validInput as any, asAdmin);
 
         const differentPharmacy = {
             ...validInput,
             pharmacyId: new mongoose.Types.ObjectId().toString(),
         };
 
-        const item = await InventoryService.create(differentPharmacy as any);
+        const item = await InventoryService.create(differentPharmacy as any, asAdmin);
         expect(item).toBeDefined();
         expect(item.medicationName).toBe('Amoxicillin');
     });
@@ -106,13 +115,13 @@ describe('InventoryService.create', () => {
     it('should throw bad request for unrecognized medication name', async () => {
         const input = { ...validInput, medicationName: 'FakeDrugXYZ123' };
 
-        await expect(InventoryService.create(input as any)).rejects.toThrow(
+        await expect(InventoryService.create(input as any, asAdmin)).rejects.toThrow(
             /not found in the drug database/
         );
     });
 
     it('should convert expiryDate string to Date object', async () => {
-        const item = await InventoryService.create(validInput as any);
+        const item = await InventoryService.create(validInput as any, asAdmin);
 
         expect(item.expiryDate).toBeInstanceOf(Date);
         expect(item.expiryDate!.toISOString()).toBe('2025-12-31T00:00:00.000Z');
@@ -126,7 +135,7 @@ describe('InventoryService.create', () => {
             unitPrice: 3.99,
         };
 
-        const item = await InventoryService.create(minInput as any);
+        const item = await InventoryService.create(minInput as any, asAdmin);
 
         expect(item).toBeDefined();
         expect(item.medicationName).toBe('Ibuprofen');
@@ -323,7 +332,7 @@ describe('InventoryService.update', () => {
         const updated = await InventoryService.update(testIds.inventoryId.toString(), {
             quantity: 200,
             unitPrice: 8.99,
-        } as any);
+        } as any, asStaff);
 
         expect(updated.quantity).toBe(200);
         expect(updated.unitPrice).toBe(8.99);
@@ -334,7 +343,7 @@ describe('InventoryService.update', () => {
 
         await InventoryService.update(testIds.inventoryId.toString(), {
             medicationName: 'Ibuprofen',
-        } as any);
+        } as any, asStaff);
 
         expect(spy).toHaveBeenCalledWith('Ibuprofen');
     });
@@ -344,7 +353,7 @@ describe('InventoryService.update', () => {
 
         await InventoryService.update(testIds.inventoryId.toString(), {
             quantity: 50,
-        } as any);
+        } as any, asStaff);
 
         expect(spy).not.toHaveBeenCalled();
     });
@@ -352,7 +361,7 @@ describe('InventoryService.update', () => {
     it('should convert expiryDate string to Date on update', async () => {
         const updated = await InventoryService.update(testIds.inventoryId.toString(), {
             expiryDate: '2026-06-30T00:00:00.000Z',
-        } as any);
+        } as any, asStaff);
 
         expect(updated.expiryDate).toBeInstanceOf(Date);
     });
@@ -361,13 +370,13 @@ describe('InventoryService.update', () => {
         const fakeId = new mongoose.Types.ObjectId().toString();
 
         await expect(
-            InventoryService.update(fakeId, { quantity: 10 } as any)
+            InventoryService.update(fakeId, { quantity: 10 } as any, asAdmin)
         ).rejects.toThrow('Inventory item not found');
     });
 
     it('should throw BAD_REQUEST for invalid ObjectId', async () => {
         await expect(
-            InventoryService.update('invalid-id', { quantity: 10 } as any)
+            InventoryService.update('invalid-id', { quantity: 10 } as any, asAdmin)
         ).rejects.toThrow('Invalid inventory item ID');
     });
 
@@ -375,7 +384,7 @@ describe('InventoryService.update', () => {
         await expect(
             InventoryService.update(testIds.inventoryId.toString(), {
                 medicationName: 'FakeUnknownDrug',
-            } as any)
+            } as any, asStaff)
         ).rejects.toThrow(/not found in the drug database/);
     });
 });
@@ -388,7 +397,7 @@ describe('InventoryService.delete', () => {
     });
 
     it('should delete an inventory item and return it', async () => {
-        const deleted = await InventoryService.delete(testIds.inventoryId.toString());
+        const deleted = await InventoryService.delete(testIds.inventoryId.toString(), asStaff);
 
         expect(deleted).toBeDefined();
         expect(deleted._id.toString()).toBe(testIds.inventoryId.toString());
@@ -401,13 +410,13 @@ describe('InventoryService.delete', () => {
     it('should throw NOT_FOUND for non-existent item', async () => {
         const fakeId = new mongoose.Types.ObjectId().toString();
 
-        await expect(InventoryService.delete(fakeId)).rejects.toThrow(
+        await expect(InventoryService.delete(fakeId, asAdmin)).rejects.toThrow(
             'Inventory item not found'
         );
     });
 
     it('should throw BAD_REQUEST for invalid ObjectId', async () => {
-        await expect(InventoryService.delete('invalid-id')).rejects.toThrow(
+        await expect(InventoryService.delete('invalid-id', asAdmin)).rejects.toThrow(
             'Invalid inventory item ID'
         );
     });
@@ -576,5 +585,80 @@ describe('InventoryService.getExpiring', () => {
         const items = await InventoryService.getExpiring({ days: 1 });
 
         expect(items).toHaveLength(0);
+    });
+});
+
+// ─── CROSS-TENANT ACCESS CONTROL (SECURITY.md #7) ───────────────────────────────
+// Regression tests for the Broken Object-Level Authorization fix: Pharmacy
+// Staff must be confined to their own pharmacy's inventory on every write
+// path, while System Admin retains cross-pharmacy access.
+
+describe('InventoryService cross-tenant authorization', () => {
+    const otherPharmacyId = new mongoose.Types.ObjectId().toString();
+    const asOtherPharmacyStaff = {
+        userId: new mongoose.Types.ObjectId().toString(),
+        role: 'Pharmacy Staff',
+        pharmacyId: otherPharmacyId,
+    };
+    const asStaffWithNoPharmacy = {
+        userId: new mongoose.Types.ObjectId().toString(),
+        role: 'Pharmacy Staff',
+    };
+
+    const baseInput = {
+        pharmacyId: testIds.pharmacyId.toString(),
+        medicationName: 'Amoxicillin',
+        quantity: 50,
+        unitPrice: 12.5,
+    };
+
+    it('should forbid staff from creating inventory for a pharmacy they do not belong to', async () => {
+        await expect(
+            InventoryService.create(baseInput as any, asOtherPharmacyStaff)
+        ).rejects.toThrow('You can only manage inventory for your own pharmacy');
+    });
+
+    it('should forbid an account with no pharmacyId from creating inventory', async () => {
+        await expect(
+            InventoryService.create(baseInput as any, asStaffWithNoPharmacy)
+        ).rejects.toThrow('Your account is not linked to a pharmacy');
+    });
+
+    it('should allow staff to create inventory for their own pharmacy', async () => {
+        const item = await InventoryService.create(baseInput as any, asStaff);
+        expect(item.pharmacyId.toString()).toBe(testIds.pharmacyId.toString());
+    });
+
+    it('should allow System Admin to create inventory for any pharmacy', async () => {
+        const item = await InventoryService.create(
+            { ...baseInput, pharmacyId: otherPharmacyId } as any,
+            asAdmin
+        );
+        expect(item.pharmacyId.toString()).toBe(otherPharmacyId);
+    });
+
+    describe('once an item exists in testIds.pharmacyId', () => {
+        beforeEach(async () => {
+            await createTestInventory();
+        });
+
+        it('should forbid staff from another pharmacy from updating the item', async () => {
+            await expect(
+                InventoryService.update(
+                    testIds.inventoryId.toString(),
+                    { quantity: 999 } as any,
+                    asOtherPharmacyStaff
+                )
+            ).rejects.toThrow('You can only manage inventory for your own pharmacy');
+        });
+
+        it('should forbid staff from another pharmacy from deleting the item', async () => {
+            await expect(
+                InventoryService.delete(testIds.inventoryId.toString(), asOtherPharmacyStaff)
+            ).rejects.toThrow('You can only manage inventory for your own pharmacy');
+
+            const stillThere = await Inventory.findById(testIds.inventoryId);
+            expect(stillThere).not.toBeNull();
+        });
     });
 });

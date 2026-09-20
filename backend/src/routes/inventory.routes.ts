@@ -288,6 +288,12 @@ const router = Router();
  *       409:
  *         description: Conflict — medication already exists in this pharmacy
  */
+// SECURITY FIX (Cross-Tenant Broken Object-Level Authorization — see
+// SECURITY.md #7): the role check here (Pharmacy Staff / System Admin) only
+// proves the caller works at *some* pharmacy — it does not confine them to
+// their own. The actual tenant-boundary enforcement (a Pharmacy Staff user
+// may only write to their own pharmacyId) lives in
+// InventoryService.assertOwnsPharmacy(), called from create/update/delete.
 router.post(
     '/',
     authenticate,
@@ -543,6 +549,8 @@ router.get(
  *       404:
  *         description: Inventory item not found
  */
+// SECURITY FIX — see SECURITY.md #7. Ownership of the specific inventory
+// item's pharmacy is enforced in InventoryService.update().
 router.put(
     '/:id',
     authenticate,
@@ -583,6 +591,8 @@ router.put(
  *       404:
  *         description: Inventory item not found
  */
+// SECURITY FIX — see SECURITY.md #7. Ownership of the specific inventory
+// item's pharmacy is enforced in InventoryService.delete().
 router.delete(
     '/:id',
     authenticate,

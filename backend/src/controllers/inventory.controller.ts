@@ -16,7 +16,11 @@ export class InventoryController {
     static async create(req: Request, res: Response, next: NextFunction) {
         try {
             if (!req.user) throw ApiError.unauthorized();
-            const item = await InventoryService.create(req.body);
+            const item = await InventoryService.create(req.body, {
+                userId: String(req.user._id),
+                role: req.user.role,
+                pharmacyId: req.user.pharmacyId ? String(req.user.pharmacyId) : undefined,
+            });
             ApiResponse.created(res, item, 'Inventory item created successfully');
         } catch (error) {
             next(error);
@@ -54,7 +58,11 @@ export class InventoryController {
     static async update(req: Request, res: Response, next: NextFunction) {
         try {
             if (!req.user) throw ApiError.unauthorized();
-            const item = await InventoryService.update(String(req.params.id), req.body);
+            const item = await InventoryService.update(String(req.params.id), req.body, {
+                userId: String(req.user._id),
+                role: req.user.role,
+                pharmacyId: req.user.pharmacyId ? String(req.user.pharmacyId) : undefined,
+            });
             ApiResponse.success(res, item, 'Inventory item updated successfully');
         } catch (error) {
             next(error);
@@ -68,7 +76,11 @@ export class InventoryController {
     static async delete(req: Request, res: Response, next: NextFunction) {
         try {
             if (!req.user) throw ApiError.unauthorized();
-            const item = await InventoryService.delete(String(req.params.id));
+            const item = await InventoryService.delete(String(req.params.id), {
+                userId: String(req.user._id),
+                role: req.user.role,
+                pharmacyId: req.user.pharmacyId ? String(req.user.pharmacyId) : undefined,
+            });
             ApiResponse.success(res, item, 'Inventory item deleted successfully');
         } catch (error) {
             next(error);
