@@ -1,9 +1,11 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { AuthController } from '../controllers/auth.controller';
 import { validate } from '../middlewares/validate.middleware';
 import { authenticate } from '../middlewares/auth.middleware';
 import { authorize } from '../middlewares/rbac.middleware';
 import { UserRole } from '../models/user.model';
+import { env } from '../config/env';
 import {
   registerSchema,
   registerStaffSchema,
@@ -12,6 +14,30 @@ import {
 } from '../validators/auth.validator';
 
 const router = Router();
+
+// SECURITY FIX (Insufficient Brute-Force Protection — see SECURITY.md #6):
+// the only throttling on these routes used to be the app-wide limiter
+// (100 requests / 15 min, shared across every API route), which is far too
+// loose to slow down password guessing against a single account. This
+// dedicated limiter applies a much tighter budget to just the
+// authentication routes. It's still IP-based (a real production deployment
+// would pair this with per-account lockout/backoff and CAPTCHA on
+// repeated failures), but it meaningfully raises the cost of both
+// credential-stuffing and registration-spam attacks.
+const authRateLimiter = rateLimit({
+  windowMs: parseInt(env.AUTH_RATE_LIMIT_WINDOW_MS),
+  max: parseInt(env.AUTH_RATE_LIMIT_MAX),
+  message: {
+    success: false,
+    error: {
+      code: 'AUTH_RATE_LIMIT',
+      message: 'Too many authentication attempts. Please try again later.',
+    },
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+});
 
 /**
  * @swagger
@@ -136,7 +162,7 @@ const router = Router();
 // authorization check at all, so anyone could self-register as System
 // Admin. Public registration is now hardcoded to the Patient role — see
 // POST /auth/staff below for how privileged accounts get created instead.
-router.post('/register', validate(registerSchema), AuthController.register);
+router.post('/register', authRateLimiter, validate(registerSchema), AuthController.register);
 
 /**
  * @swagger
@@ -185,7 +211,7 @@ router.post(
  *       401:
  *         description: Invalid credentials
  */
-router.post('/login', validate(loginSchema), AuthController.login);
+router.post('/login', authRateLimiter, validate(loginSchema), AuthController.login);
 
 /**
  * @swagger

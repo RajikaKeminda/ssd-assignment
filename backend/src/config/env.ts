@@ -43,6 +43,8 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
   RATE_LIMIT_WINDOW_MS: z.string().default('900000'),
   RATE_LIMIT_MAX: z.string().default('100'),
+  AUTH_RATE_LIMIT_WINDOW_MS: z.string().default('600000'),
+  AUTH_RATE_LIMIT_MAX: z.string().default('10'),
   STRIPE_SECRET_KEY: z.string().default('sk_test_mock_key'),
   GOOGLE_MAPS_API_KEY: z.string().default('mock-google-maps-key'),
   RXNORM_API_BASE_URL: z.string().default('mock'),
