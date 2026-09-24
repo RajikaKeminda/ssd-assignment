@@ -4,6 +4,7 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 import { Home } from './pages/Home'
 import { Login } from './pages/Login'
 import { Signup } from './pages/Signup'
+import { GoogleOAuthCallbackPage } from './pages/GoogleOAuthCallbackPage'
 import { OrdersPage } from './pages/OrdersPage'
 import { OrderDetailPage } from './pages/OrderDetailPage'
 import { CreateOrderPage } from './pages/CreateOrderPage'
@@ -25,6 +26,8 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        {/* New feature: Sign in with Google — OAuth redirect target, see SECURITY.md */}
+        <Route path="/oauth/google/callback" element={<GoogleOAuthCallbackPage />} />
         <Route
           path="/pharmacies"
           element={<PharmaciesPage />}

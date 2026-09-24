@@ -3,6 +3,8 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { ApiClientError } from '../api/client'
 import { AuthScenery } from '../components/AuthScenery'
+import { GoogleSignInButton } from '../components/GoogleSignInButton'
+import { isGoogleSignInConfigured } from '../utils/googleOAuth'
 
 // SECURITY FIX (Privilege Escalation via Mass Assignment — see
 // SECURITY.md #2): this form used to let anyone pick "System Admin" (or
@@ -95,6 +97,16 @@ export function Signup() {
         </div>
 
         <div className="rounded-2xl border border-slate-200/90 bg-white/90 p-8 shadow-xl shadow-slate-200/50 backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/90 dark:shadow-none">
+          {isGoogleSignInConfigured() && (
+            <>
+              <GoogleSignInButton label="Sign up with Google" />
+              <div className="my-5 flex items-center gap-3 text-xs font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                <span className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
+                or sign up with email
+                <span className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
+              </div>
+            </>
+          )}
           <form className="flex flex-col gap-5" onSubmit={handleSubmit} noValidate>
             {error ? (
               <div

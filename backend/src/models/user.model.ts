@@ -8,11 +8,23 @@ export enum UserRole {
   SYSTEM_ADMIN = 'System Admin',
 }
 
+/**
+ * New feature: Sign in with Google (OAuth 2.0 / OpenID Connect Authorization
+ * Code grant — see SECURITY.md "New Feature" and services/oauth.service.ts).
+ * `authProvider` distinguishes password-based accounts from
+ * federated-identity accounts; `googleId` stores Google's stable subject
+ * (`sub`) claim so a returning Google user is matched to the same account
+ * even if they change their Google email.
+ */
+export type AuthProvider = 'local' | 'google';
+
 export interface IUser extends Document {
   _id: mongoose.Types.ObjectId;
   name: string;
   email: string;
-  password: string;
+  password?: string;
+  authProvider: AuthProvider;
+  googleId?: string;
   role: UserRole;
   phone?: string;
   address?: {
@@ -52,8 +64,26 @@ const userSchema = new Schema<IUser>(
     },
     password: {
       type: String,
-      required: [true, 'Password is required'],
+      // A Google-authenticated account has no local password — Google is
+      // the identity provider, so we never store or check one for them.
+      required: [
+        function (this: IUser) {
+          return this.authProvider !== 'google';
+        },
+        'Password is required',
+      ],
       minlength: [8, 'Password must be at least 8 characters'],
+      select: false,
+    },
+    authProvider: {
+      type: String,
+      enum: ['local', 'google'],
+      default: 'local',
+    },
+    googleId: {
+      type: String,
+      unique: true,
+      sparse: true, // allows many docs with no googleId (local accounts)
       select: false,
     },
     role: {
@@ -104,12 +134,14 @@ const userSchema = new Schema<IUser>(
 userSchema.index({ role: 1 });
 
 userSchema.pre('save', async function (next: () => void) {
-  if (!this.isModified('password')) return next();
+  if (!this.isModified('password') || !this.password) return next();
   this.password = await bcrypt.hash(this.password, 10);
   next();
 });
 
 userSchema.methods.comparePassword = async function (candidatePassword: string): Promise<boolean> {
+  // A Google-only account has no local password to compare against.
+  if (!this.password) return false;
   return bcrypt.compare(candidatePassword, this.password);
 };
 

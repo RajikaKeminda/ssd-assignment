@@ -266,4 +266,38 @@ router.post('/logout', AuthController.logout);
  */
 router.post('/refresh', validate(refreshTokenSchema), AuthController.refreshToken);
 
+/**
+ * @swagger
+ * /auth/google:
+ *   post:
+ *     summary: Sign in / sign up with Google (OAuth 2.0 / OpenID Connect Authorization Code grant)
+ *     description: >
+ *       New feature — see SECURITY.md "New Feature: Sign in with Google".
+ *       The frontend obtains an authorization `code` from Google's consent
+ *       screen and posts it here along with the exact `redirectUri` that was
+ *       used to request it. The backend exchanges the code for tokens
+ *       server-side (using GOOGLE_CLIENT_SECRET, which never reaches the
+ *       browser), verifies the OpenID Connect ID token, and finds or
+ *       creates the matching local account.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [code, redirectUri]
+ *             properties:
+ *               code:
+ *                 type: string
+ *               redirectUri:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Signed in with Google successfully
+ *       401:
+ *         description: Invalid or expired Google authorization code
+ */
+router.post('/google', authRateLimiter, AuthController.googleCallback);
+
 export default router;

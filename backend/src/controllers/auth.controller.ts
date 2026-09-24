@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AuthService } from '../services/auth.service';
+import { OAuthService } from '../services/oauth.service';
 import { ApiResponse } from '../utils/api-response';
 import { ApiError } from '../utils/api-error';
 import { env } from '../config/env';
@@ -121,6 +122,32 @@ export class AuthController {
       ApiResponse.success(res, {
         accessToken: tokens.accessToken,
       }, 'Token refreshed successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * New feature: Sign in with Google (OAuth 2.0 / OpenID Connect
+   * Authorization Code grant). See SECURITY.md "New Feature" and
+   * services/oauth.service.ts for the full flow.
+   */
+  static async googleCallback(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { code, redirectUri } = req.body;
+      if (!code || !redirectUri) {
+        throw ApiError.badRequest('code and redirectUri are required');
+      }
+
+      const { user, isNewUser } = await OAuthService.loginWithGoogle(code, redirectUri);
+      const tokens = await AuthService.generateTokenPair(String(user._id), user.role);
+
+      setRefreshTokenCookie(res, tokens.refreshToken);
+      ApiResponse.success(
+        res,
+        { user, accessToken: tokens.accessToken, isNewUser },
+        'Signed in with Google successfully'
+      );
     } catch (error) {
       next(error);
     }

@@ -33,3 +33,17 @@ export function refreshTokens() {
     skipAuth: true,
   })
 }
+
+/**
+ * New feature: Sign in with Google (OAuth 2.0 / OpenID Connect
+ * Authorization Code grant). Exchanges the `code` Google redirected back
+ * with for a session — see SECURITY.md "New Feature" and
+ * pages/GoogleOAuthCallbackPage.jsx for the full flow.
+ */
+export function googleLogin({ code, redirectUri }) {
+  return apiRequest('/auth/google', {
+    method: 'POST',
+    body: { code, redirectUri },
+    skipAuth: true,
+  })
+}

@@ -48,6 +48,13 @@ const envSchema = z.object({
   STRIPE_SECRET_KEY: z.string().default('sk_test_mock_key'),
   GOOGLE_MAPS_API_KEY: z.string().default('mock-google-maps-key'),
   RXNORM_API_BASE_URL: z.string().default('mock'),
+  // OAuth / OpenID Connect (Google) — see SECURITY.md "New Feature: Sign in
+  // with Google". Optional so the app still boots without them configured;
+  // the OAuth routes themselves return a clear error if a request reaches
+  // them while unconfigured.
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_OAUTH_REDIRECT_URI: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

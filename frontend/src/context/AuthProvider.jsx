@@ -62,6 +62,21 @@ export function AuthProvider({ children }) {
     [persistSession]
   )
 
+  /**
+   * New feature: Sign in with Google. Called by GoogleOAuthCallbackPage once
+   * it has the authorization code from Google — see SECURITY.md
+   * "New Feature: Sign in with Google".
+   */
+  const loginWithGoogle = useCallback(
+    async ({ code, redirectUri }) => {
+      const res = await authApi.googleLogin({ code, redirectUri })
+      const { user: u, accessToken } = res.data
+      persistSession(u, accessToken)
+      return u
+    },
+    [persistSession]
+  )
+
   useEffect(() => {
     const handler = () => clearSession()
     window.addEventListener('auth:sessionExpired', handler)
@@ -113,9 +128,10 @@ export function AuthProvider({ children }) {
       isInitializing,
       login,
       register,
+      loginWithGoogle,
       logout,
     }),
-    [user, isInitializing, login, register, logout]
+    [user, isInitializing, login, register, loginWithGoogle, logout]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
