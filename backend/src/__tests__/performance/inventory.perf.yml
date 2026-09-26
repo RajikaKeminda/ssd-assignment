@@ -1,0 +1,99 @@
+config:
+  target: "http://localhost:5000"
+  phases:
+    # Warm-up: ramp up gradually over 30 seconds
+    - duration: 30
+      arrivalRate: 5
+      name: "Warm-up phase"
+
+    # Sustained load: steady traffic for 60 seconds
+    - duration: 60
+      arrivalRate: 20
+      name: "Sustained load phase"
+
+    # Spike test: high traffic burst for 30 seconds
+    - duration: 30
+      arrivalRate: 50
+      name: "Spike test phase"
+
+  defaults:
+    headers:
+      Content-Type: "application/json"
+
+  variables:
+    target: "http://localhost:5000"
+
+  plugins:
+    ensure:
+      thresholds:
+        - http.response_time.p95: 500
+        - http.response_time.p99: 1000
+
+  processor: "./inventory.perf.processor.js"
+
+before:
+  flow:
+    - log: "Setting up inventory performance test data via processor..."
+    - function: "setupTestData"
+
+scenarios:
+  # Scenario 1: Get all inventory items (paginated)
+  - name: "Get all inventory items"
+    weight: 30
+    flow:
+      - function: "setStaffAuth"
+      - get:
+          url: "/api/inventory?page=1&limit=10"
+          headers:
+            Authorization: "Bearer {{ staffToken }}"
+          expect:
+            - statusCode: 200
+            - hasProperty: "body.success"
+
+  # Scenario 2: Get inventory item by ID
+  - name: "Get inventory item by ID"
+    weight: 25
+    flow:
+      - function: "setStaffAuth"
+      - get:
+          url: "/api/inventory/{{ inventoryId }}"
+          headers:
+            Authorization: "Bearer {{ staffToken }}"
+          expect:
+            - statusCode: 200
+
+  # Scenario 3: Get low-stock items
+  - name: "Get low-stock items"
+    weight: 20
+    flow:
+      - function: "setStaffAuth"
+      - get:
+          url: "/api/inventory/low-stock"
+          headers:
+            Authorization: "Bearer {{ staffToken }}"
+          expect:
+            - statusCode: 200
+
+  # Scenario 4: Get expiring items
+  - name: "Get expiring items"
+    weight: 15
+    flow:
+      - function: "setStaffAuth"
+      - get:
+          url: "/api/inventory/expiring?days=30"
+          headers:
+            Authorization: "Bearer {{ staffToken }}"
+          expect:
+            - statusCode: 200
+
+  # Scenario 5: Search inventory
+  - name: "Search inventory"
+    weight: 10
+    flow:
+      - function: "setStaffAuth"
+      - get:
+          url: "/api/inventory?search=Perf&page=1&limit=10"
+          headers:
+            Authorization: "Bearer {{ staffToken }}"
+          expect:
+            - statusCode: 200

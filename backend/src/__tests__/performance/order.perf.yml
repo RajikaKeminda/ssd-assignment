@@ -1,0 +1,100 @@
+config:
+  target: "http://localhost:5000"
+  phases:
+    # Warm-up: ramp up gradually over 30 seconds
+    - duration: 30
+      arrivalRate: 5
+      name: "Warm-up phase"
+
+    # Sustained load: steady traffic for 60 seconds
+    - duration: 60
+      arrivalRate: 20
+      name: "Sustained load phase"
+
+    # Spike test: high traffic burst for 30 seconds
+    - duration: 30
+      arrivalRate: 50
+      name: "Spike test phase"
+
+  defaults:
+    headers:
+      Content-Type: "application/json"
+
+  # Variables replaced by processor functions at runtime
+  variables:
+    target: "http://localhost:5000"
+
+  plugins:
+    ensure:
+      thresholds:
+        - http.response_time.p95: 500
+        - http.response_time.p99: 1000
+
+  processor: "./order.perf.processor.js"
+
+before:
+  flow:
+    - log: "Setting up test data via processor..."
+    - function: "setupTestData"
+
+scenarios:
+  # Scenario 1: Get all orders (staff/admin)
+  - name: "Get all orders"
+    weight: 30
+    flow:
+      - function: "setStaffAuth"
+      - get:
+          url: "/api/orders?page=1&limit=10"
+          headers:
+            Authorization: "Bearer {{ staffToken }}"
+          expect:
+            - statusCode: 200
+            - hasProperty: "body.success"
+
+  # Scenario 2: Get order by ID
+  - name: "Get order by ID"
+    weight: 25
+    flow:
+      - function: "setPatientAuth"
+      - get:
+          url: "/api/orders/{{ orderId }}"
+          headers:
+            Authorization: "Bearer {{ patientToken }}"
+          expect:
+            - statusCode: 200
+
+  # Scenario 3: Get delivery tracking
+  - name: "Get delivery tracking"
+    weight: 20
+    flow:
+      - function: "setPatientAuth"
+      - get:
+          url: "/api/orders/track/{{ orderId }}"
+          headers:
+            Authorization: "Bearer {{ patientToken }}"
+          expect:
+            - statusCode: 200
+
+  # Scenario 4: Get user orders
+  - name: "Get user orders"
+    weight: 15
+    flow:
+      - function: "setPatientAuth"
+      - get:
+          url: "/api/orders/user/{{ userId }}"
+          headers:
+            Authorization: "Bearer {{ patientToken }}"
+          expect:
+            - statusCode: 200
+
+  # Scenario 5: Get pharmacy orders
+  - name: "Get pharmacy orders"
+    weight: 10
+    flow:
+      - function: "setStaffAuth"
+      - get:
+          url: "/api/orders/pharmacy/{{ pharmacyId }}"
+          headers:
+            Authorization: "Bearer {{ staffToken }}"
+          expect:
+            - statusCode: 200

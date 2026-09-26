@@ -1,0 +1,17 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans:
+    'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji', 'Segoe UI Symbol';
+}
+
+@layer base {
+  body {
+    @apply m-0 min-h-svh antialiased;
+  }
+
+  #root {
+    @apply flex min-h-svh w-full max-w-none flex-col;
+  }
+}

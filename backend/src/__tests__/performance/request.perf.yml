@@ -1,0 +1,89 @@
+config:
+  target: 'http://localhost:3000'
+  phases:
+    - duration: 30
+      arrivalRate: 5
+      name: "Warm up"
+    - duration: 60
+      arrivalRate: 20
+      name: "Sustained load"
+    - duration: 30
+      arrivalRate: 50
+      name: "Spike test"
+  processor: "./request.perf.processor.js"
+  variables:
+    patientToken: "{{ $processEnvironment.PERF_PATIENT_TOKEN }}"
+    staffToken: "{{ $processEnvironment.PERF_STAFF_TOKEN }}"
+    adminToken: "{{ $processEnvironment.PERF_ADMIN_TOKEN }}"
+    requestId: "{{ $processEnvironment.PERF_REQUEST_ID }}"
+    userId: "{{ $processEnvironment.PERF_USER_ID }}"
+    pharmacyId: "{{ $processEnvironment.PERF_PHARMACY_ID }}"
+
+scenarios:
+  - name: "Get all requests (Staff)"
+    weight: 25
+    flow:
+      - get:
+          url: "/api/requests?page=1&limit=10"
+          headers:
+            Authorization: "Bearer {{ staffToken }}"
+
+  - name: "Get request by ID (Patient)"
+    weight: 20
+    flow:
+      - get:
+          url: "/api/requests/{{ requestId }}"
+          headers:
+            Authorization: "Bearer {{ patientToken }}"
+
+  - name: "Get user requests (Patient)"
+    weight: 15
+    flow:
+      - get:
+          url: "/api/requests/user/{{ userId }}?page=1&limit=10"
+          headers:
+            Authorization: "Bearer {{ patientToken }}"
+
+  - name: "Get pharmacy requests (Staff)"
+    weight: 15
+    flow:
+      - get:
+          url: "/api/requests/pharmacy/{{ pharmacyId }}?page=1&limit=10"
+          headers:
+            Authorization: "Bearer {{ staffToken }}"
+
+  - name: "Get urgent requests (Staff)"
+    weight: 10
+    flow:
+      - get:
+          url: "/api/requests/urgent?page=1&limit=10"
+          headers:
+            Authorization: "Bearer {{ staffToken }}"
+
+  - name: "Create new request (Patient)"
+    weight: 10
+    flow:
+      - post:
+          url: "/api/requests"
+          headers:
+            Authorization: "Bearer {{ patientToken }}"
+            Content-Type: "application/json"
+          json:
+            pharmacyId: "{{ pharmacyId }}"
+            medicationName: "Performance Test Medication"
+            quantity: 30
+            urgencyLevel: "normal"
+            prescriptionRequired: false
+            notes: "Performance test request"
+
+  - name: "Update request status (Staff)"
+    weight: 5
+    flow:
+      - patch:
+          url: "/api/requests/{{ requestId }}/status"
+          headers:
+            Authorization: "Bearer {{ staffToken }}"
+            Content-Type: "application/json"
+          json:
+            status: "processing"
+            notes: "Performance test status update"
