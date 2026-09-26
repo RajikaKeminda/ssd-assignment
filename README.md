@@ -3,10 +3,12 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Security Hardening & New Authentication Features (SE4030 Assignment)](#security-hardening--new-authentication-features-se4030-assignment)
 - [Tech Stack](#tech-stack)
 - [Setup Instructions](#setup-instructions)
 - [API Endpoint Documentation](#api-endpoint-documentation)
   - [Authentication](#authentication)
+  - [Auth Endpoints (New/Changed)](#auth-endpoints-newchanged)
   - [Standard Response Format](#standard-response-format)
   - [Order Endpoints](#order-endpoints)
     - [Create Order](#1-create-order)
@@ -67,6 +69,54 @@
 ## Overview
 
 The Order Processing module (`/api/orders`) manages the full lifecycle of medication orders — from converting approved medication requests into orders, through payment processing via Stripe, delivery tracking, and cancellation with automatic refunds and inventory restoration. It is part of the Remote Pharmacy Medication Tracker system.
+
+## Security Hardening & New Authentication Features (SE4030 Assignment)
+
+This repository is a security-hardened fork of the original
+[medication-tracking-system](https://github.com/RajikaKeminda/medication-tracking-system),
+produced for the SE4030 Secure Software Development group assignment. Seven
+distinct vulnerabilities were identified (via manual white-box review
+against the OWASP Top 10 plus `npm audit` software-composition scanning),
+fixed with descriptive inline `SECURITY FIX` comments at every change site,
+and one "Sign in with Google" feature was added as a new OAuth 2.0 /
+OpenID Connect Authorization Code grant.
+
+**The full write-up — each vulnerability, how it was found, how it was
+fixed, one vulnerability that was deliberately left unfixed and why, and
+the OAuth feature design — is in [`SECURITY.md`](./SECURITY.md) at the repo
+root.** The short version:
+
+| # | Fix | Files |
+| - | --- | ----- |
+| 1 | IDOR / Broken Object-Level Authorization on Orders | `order.service.ts`, `order.controller.ts`, `order.routes.ts` |
+| 2 | Privilege escalation via mass assignment on `role` at sign-up | `auth.validator.ts`, `auth.service.ts`, `auth.controller.ts`, `Signup.jsx` |
+| 3 | Weak/placeholder JWT secrets accepted at boot | `config/env.ts` |
+| 4 | ReDoS via unescaped user input in MongoDB `$regex` search | `utils/regex.ts`, `inventory.service.ts`, `pharmacy.service.ts` |
+| 5 | Sensitive tokens stored in `localStorage` | `api/client.js`, `api/auth.js`, `AuthProvider.jsx`, `ProtectedRoute.jsx`, `auth.controller.ts` |
+| 6 | No rate limiting on `/auth/login` and `/auth/register` | `auth.routes.ts`, `config/env.ts` |
+| 7 | Cross-tenant authorization bypass on pharmacy inventory | `inventory.service.ts`, `inventory.controller.ts` |
+| 8 | Vulnerable/outdated dependencies — **not fixed**, see `SECURITY.md` for why | n/a |
+
+New feature — **Sign in with Google (OAuth 2.0 Authorization Code grant +
+OpenID Connect ID-token verification)**: `oauth.service.ts`,
+`GoogleSignInButton.jsx`, `GoogleOAuthCallbackPage.jsx`,
+`utils/googleOAuth.js`. Fully optional — unset the `GOOGLE_*` environment
+variables below and the app behaves exactly as before, with the button
+hidden.
+
+**New/changed backend environment variables** (see the full table in
+[Step 2: Backend Setup](#step-2-backend-setup) below for all of them):
+`AUTH_RATE_LIMIT_WINDOW_MS`, `AUTH_RATE_LIMIT_MAX`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`. `JWT_ACCESS_SECRET`
+and `JWT_REFRESH_SECRET` now **must** be at least 32 characters and must
+not match a known placeholder value, or the server refuses to start.
+
+**New backend script:** `npm run bootstrap:admin` (in `backend/`) creates
+the first System Admin account directly against the database. It is the
+only way to create a System Admin now that public self-registration is
+locked to the `Patient` role — see `SECURITY.md` Fix #2.
+
+---
 
 ## Tech Stack
 
@@ -139,10 +189,23 @@ cp .env.example .env
 | Variable | Description | Example |
 | -------- | ----------- | ------- |
 | `MONGODB_URI` | MongoDB connection string | `mongodb://localhost:27017/medication-tracker` or MongoDB Atlas URI |
-| `JWT_ACCESS_SECRET` | Secret for JWT access tokens | A strong, random string |
-| `JWT_REFRESH_SECRET` | Secret for JWT refresh tokens | A strong, random string |
+| `JWT_ACCESS_SECRET` | Secret for JWT access tokens. **Must be ≥32 characters and not a known placeholder** — see `SECURITY.md` Fix #3 | Generate with `openssl rand -hex 32` |
+| `JWT_REFRESH_SECRET` | Secret for JWT refresh tokens. Same 32-character-minimum requirement | Generate with `openssl rand -hex 32` |
 | `PORT` | Server port (optional, default: 5000) | `5000` |
 | `CORS_ORIGIN` | Allowed frontend origin | `http://localhost:3000` |
+| `AUTH_RATE_LIMIT_WINDOW_MS` | Rate-limit window (ms) applied to `/auth/login` and `/auth/register` — see `SECURITY.md` Fix #6 | `600000` (10 min, default) |
+| `AUTH_RATE_LIMIT_MAX` | Max requests per window per IP for those two endpoints | `10` (default) |
+| `GOOGLE_CLIENT_ID` | OAuth client id for "Sign in with Google" (optional — feature is hidden if unset) | From Google Cloud Console |
+| `GOOGLE_CLIENT_SECRET` | OAuth client secret — **server-side only, never sent to the frontend** | From Google Cloud Console |
+| `GOOGLE_OAUTH_REDIRECT_URI` | Must match an "Authorized redirect URI" configured for the OAuth client | `http://localhost:5173/oauth/google/callback` |
+
+After configuring `MONGODB_URI` and the JWT secrets, bootstrap the first
+System Admin account (public sign-up can no longer create one — see
+`SECURITY.md` Fix #2):
+
+```bash
+ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD='A-Strong-Passw0rd!' ADMIN_NAME="Admin" npm run bootstrap:admin
+```
 
 5. Build the project:
 
@@ -193,6 +256,8 @@ VITE_API_URL=http://localhost:5000/api
 | Variable | Description | Example |
 | -------- | ----------- | ------- |
 | `VITE_API_URL` | Base URL of the backend API | `http://localhost:5000/api` |
+| `VITE_GOOGLE_CLIENT_ID` | Same OAuth client id as the backend's `GOOGLE_CLIENT_ID` — public, safe to expose. Leave unset to hide the Google button | From Google Cloud Console |
+| `VITE_GOOGLE_REDIRECT_URI` | Must match the backend's `GOOGLE_OAUTH_REDIRECT_URI`. Defaults to `<origin>/oauth/google/callback` if unset | `http://localhost:5173/oauth/google/callback` |
 
 4. Start the development server:
 
@@ -240,15 +305,43 @@ All order endpoints require a valid JWT access token passed in the `Authorizatio
 Authorization: Bearer <access_token>
 ```
 
-Tokens are obtained via `POST /api/auth/login` and carry a payload of `{ userId, role }`. Access tokens expire after 15 minutes by default.
+Tokens are obtained via `POST /api/auth/login` (or `POST /api/auth/google`)
+and carry a payload of `{ userId, role }`. Access tokens expire after 15
+minutes by default.
+
+> **Changed in this fork (see `SECURITY.md` Fix #5):** the refresh token is
+> no longer returned in the JSON response body. It is set as an `httpOnly`,
+> `sameSite`-protected cookie, which the browser attaches automatically to
+> `POST /api/auth/refresh` — client-side JavaScript cannot read it, which
+> keeps it safe even from an XSS bug elsewhere in the app. The access token
+> is still returned in the JSON body (for the `Authorization` header above)
+> but the frontend keeps it only in memory, never in `localStorage`.
+> Requests that rely on the refresh cookie must be made with
+> `credentials: 'include'`.
 
 **User Roles:**
 
-| Role             | Description                                |
-| ---------------- | ------------------------------------------ |
-| `Patient`        | End users who request and order medications |
-| `Pharmacy Staff` | Pharmacy administrators managing orders     |
-| `System Admin`   | Full system access                          |
+| Role               | Description                                                     |
+| ------------------ | ----------------------------------------------------------------|
+| `Patient`          | End users who request and order medications. The only role public `POST /auth/register` can create — see `SECURITY.md` Fix #2 |
+| `Pharmacy Staff`   | Pharmacy administrators managing their own pharmacy's orders/inventory |
+| `Delivery Partner` | Fulfils and tracks deliveries assigned to them                  |
+| `System Admin`     | Full system access; the only role that can create Staff/Delivery Partner/Admin accounts via `POST /auth/staff` |
+
+### Auth Endpoints (New/Changed)
+
+| Method & Path | Auth required | Notes |
+| --- | --- | --- |
+| `POST /api/auth/register` | No | Public sign-up. Always creates a `Patient` — a `role` field in the body is ignored server-side (Fix #2). Rate-limited (Fix #6). |
+| `POST /api/auth/staff` | Yes — `System Admin` only | **New.** Creates a Pharmacy Staff / Delivery Partner / System Admin account. Replaces the old ability to self-register as one of these roles. |
+| `POST /api/auth/login` | No | Sets the refresh token as an httpOnly cookie; returns the access token in the body. Rate-limited (Fix #6). |
+| `POST /api/auth/refresh` | No (relies on the httpOnly cookie) | Issues a new access token. Requires `credentials: 'include'`. |
+| `POST /api/auth/logout` | No (relies on the httpOnly cookie) | Clears the refresh-token cookie server-side. |
+| `POST /api/auth/google` | No | **New.** Body: `{ code, redirectUri }` — the authorization code from Google's OAuth consent redirect. Verifies the code + resulting OpenID Connect ID token server-side and logs the user in (creating an account on first sign-in). See `SECURITY.md` → "New Feature: Sign in with Google". |
+
+Creating the very first `System Admin` (before any admin exists to call
+`POST /auth/staff`) is done out-of-band with `npm run bootstrap:admin` in
+`backend/` — see [Step 2: Backend Setup](#step-2-backend-setup).
 
 ### Standard Response Format
 
